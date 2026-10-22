@@ -1,0 +1,275 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#222">
+<!-- Butter Spread: a needle-felt breakfast table. Renders every layer of the interface as PNG/JPEG.
+     Serve this folder with serve.py and open spread-scene.html?only=bg|title|props|butter
+     Each finished image is POSTed to /save and lands in out/. -->
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+import { TTFLoader } from 'three/addons/loaders/TTFLoader.js';
+import { Font } from 'three/addons/loaders/FontLoader.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const P = new URLSearchParams(location.search);
+const W = 1760, H = 1232;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W, H); renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.12;
+document.body.appendChild(renderer.domElement); renderer.domElement.style.width = '50%';
+let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+// ---------- wool materials (needle-felt fibres painted onto canvas textures) ----------
+function fibres(g, h, flecks, n, len, size) {
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * size, y = rnd() * size, a = rnd() * Math.PI * 2, l = 2 + rnd() * len;
+    const x2 = x + Math.cos(a) * l, y2 = y + Math.sin(a) * l, cx = (x + x2) / 2 + (rnd() - 0.5) * 4, cy = (y + y2) / 2 + (rnd() - 0.5) * 4;
+    if (flecks) { g.strokeStyle = flecks[Math.floor(rnd() * flecks.length)]; g.globalAlpha = 0.45 + rnd() * 0.5; g.lineWidth = 0.7 + rnd() * 1.1;
+      g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(cx, cy, x2, y2); g.stroke(); }
+    h.strokeStyle = rnd() > 0.5 ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'; h.lineWidth = 0.8 + rnd();
+    h.beginPath(); h.moveTo(x, y); h.quadraticCurveTo(cx, cy, x2, y2); h.stroke();
+  }
+  g.globalAlpha = 1;
+}
+function canvases(size = 512) { const c = document.createElement('canvas'); c.width = c.height = size; const b = document.createElement('canvas'); b.width = b.height = size;
+  const h = b.getContext('2d'); h.fillStyle = '#808080'; h.fillRect(0, 0, size, size); return [c, c.getContext('2d'), b, h]; }
+function tex(c, srgb) { const t = new THREE.CanvasTexture(c); if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t; }
+const cache = {};
+function woolMaps(key, base, flecks, n = 14000, len = 9, paint) {
+  if (cache[key]) return cache[key];
+  const [c, g, b, h] = canvases(); g.fillStyle = base; g.fillRect(0, 0, 512, 512); if (paint) paint(g, h); fibres(g, h, flecks, n, len, 512);
+  return (cache[key] = [tex(c, true), tex(b)]);
+}
+function matFrom([map, bump], rep, sheen, bumpScale, extra = {}) {
+  const m = map.clone(), bmp = bump.clone(); m.needsUpdate = bmp.needsUpdate = true; m.repeat.set(...rep); bmp.repeat.set(...rep);
+  return new THREE.MeshPhysicalMaterial(Object.assign({ map: m, bumpMap: bmp, bumpScale, roughness: 1, sheen: 0.8, sheenRoughness: 0.5, sheenColor: new THREE.Color(sheen) }, extra));
+}
+const wool = (key, base, flecks, rep = [1, 1], sheen = '#ffffff', bump = 3, extra) => matFrom(woolMaps(key, base, flecks), rep, sheen, bump, extra);
+const mesh = (g, m, cast = true) => { const x = new THREE.Mesh(g, m); x.castShadow = cast; x.receiveShadow = true; return x; };
+function lumpy(r, k = 0.08, seg = 40) { const g = new THREE.SphereGeometry(r, seg, Math.round(seg * 0.7)); const p = g.attributes.position; const o = rnd() * 10;
+  for (let i = 0; i < p.count; i++) { const v = new THREE.Vector3().fromBufferAttribute(p, i); const n = Math.sin(v.x * 2.1 / r + o) * Math.sin(v.y * 2.7 / r + o * 1.3) * Math.sin(v.z * 1.9 / r + o * 0.7);
+    v.multiplyScalar(1 + k * n); p.setXYZ(i, v.x, v.y, v.z); } g.computeVertexNormals(); return g; }
+function wobble(g, k = 0.03) { const p = g.attributes.position; const o = rnd() * 10;
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i); const n = 1 + k * Math.sin(x * 3.1 + o) * Math.sin(y * 2.3 + o) * Math.sin(z * 2.9 + o); p.setXYZ(i, x * n, y * n, z * n); }
+  g.computeVertexNormals(); return g; }
+
+function lights(scene) {
+  scene.add(new THREE.HemisphereLight('#e4dcd8', '#5a4030', 1.0));
+  const sun = new THREE.DirectionalLight('#ffd6a8', 2.8); sun.position.set(-20, 14, 14); sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048); sun.shadow.radius = 6; sun.shadow.bias = -0.0004;
+  Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 }); scene.add(sun);
+  const fill = new THREE.DirectionalLight('#c8d0f0', 0.5); fill.position.set(14, 6, 10); scene.add(fill);
+}
+
+
+// ---------- shared bits ----------
+function shot(w, h, build, camPos, look, fov = 24) {
+  renderer.setSize(w, h); const scene = new THREE.Scene(); lights(scene);
+  const cam = new THREE.PerspectiveCamera(fov, w / h, 0.1, 100); cam.position.set(...camPos); cam.lookAt(...look); build(scene); renderer.render(scene, cam);
+  return pop(renderer.domElement, w, h);
+}
+// Lift saturation a little on every render so the felt colours pop
+function pop(src, w, h, type = 'image/png') { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+  g.filter = 'saturate(1.35) contrast(1.05)'; g.drawImage(src, 0, 0); return c.toDataURL(type, 0.9); }
+async function save(name, url) { await fetch('/save?name=' + name, { method: 'POST', body: url }); }
+const saveJson = (name, obj) => save(name, 'data:application/json;base64,' + btoa(JSON.stringify(obj, null, 1)));
+function project(camPos, look, fov, w, h, p) { const cam = new THREE.PerspectiveCamera(fov, w / h, 0.1, 100); cam.position.set(...camPos); cam.lookAt(...look); cam.updateMatrixWorld();
+  const v = new THREE.Vector3(...p).project(cam); return [Math.round((v.x + 1) / 2 * w * 10) / 10, Math.round((1 - v.y) / 2 * h * 10) / 10]; }
+
+const cream = (rep = [2, 2]) => wool('cream', '#fff3de', ['#fffaf0', '#f0d8b8', '#ffffff', '#ecd0ae'], rep, '#ffffff', 3);
+const walnut = (rep = [2, 1]) => wool('walnut', '#4a3020', ['#3a2416', '#5a3a26', '#2e1c12', '#6a4630'], rep, '#e0b890', 4);
+const chrome = (rep = [2, 2]) => wool('chrome', '#d6dce2', ['#ffffff', '#b8c0c8', '#eef2f6', '#9aa4ae'], rep, '#ffffff', 1.5, { sheen: 1, sheenRoughness: 0.3 });
+const butterM = () => wool('butter', '#ffd84a', ['#fff0a0', '#ffc928', '#fff8d0', '#f8c020'], [2, 2], '#fffbe0', 2.5);
+const brassM = () => wool('brass', '#d8a850', ['#e8c070', '#b88a38', '#f0d090'], [1, 1], '#fff0c0', 2);
+
+// ---------- toast on a plate (the width control) ----------
+const TOAST_CAM = [[0, 7.5, 7.0], [0, 0, 0.1], 30], TW = 800, TH = 600;
+const TOAST_TOP = 0.77;
+function plate(s) {
+  const pts = [[0, 0], [2.7, 0], [2.95, 0.08], [3.25, 0.26], [3.42, 0.32], [3.46, 0.28]].map(([x, y]) => new THREE.Vector2(x, y));
+  s.add(mesh(new THREE.LatheGeometry(pts, 96), wool('china', '#fff6e8', ['#ffffff', '#f0e0c8'], [8, 2], '#ffffff', 2, { side: THREE.DoubleSide })));
+  const rim = mesh(new THREE.TorusGeometry(3.2, 0.06, 10, 96), wool('cobalt', '#2f6fe0', ['#4a88f0', '#2058c8', '#88b0ff'], [12, 1], '#e0ecff', 2)); rim.rotation.x = Math.PI / 2; rim.position.y = 0.26; s.add(rim);
+}
+function toast(s) {
+  const sh = new THREE.Shape(); sh.moveTo(-1.55, -1.75); sh.lineTo(1.55, -1.75); sh.quadraticCurveTo(1.85, -1.75, 1.85, -1.4); sh.lineTo(1.85, 0.8);
+  sh.bezierCurveTo(2.25, 1.15, 2.1, 2.0, 1.1, 1.95); sh.bezierCurveTo(0.6, 2.15, -0.6, 2.15, -1.1, 1.95); sh.bezierCurveTo(-2.1, 2.0, -2.25, 1.15, -1.85, 0.8);
+  sh.lineTo(-1.85, -1.4); sh.quadraticCurveTo(-1.85, -1.75, -1.55, -1.75);
+  const g = wobble(new THREE.ExtrudeGeometry(sh, { depth: 0.45, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.14, bevelSegments: 5, curveSegments: 32 }), 0.015);
+  g.rotateX(-Math.PI / 2); g.translate(0, 0.22, 0);
+  const crumb = matFrom(woolMaps('crumb', '#e9b45c', ['#f6cf80', '#d89640', '#c47a2c', '#fae0a8'], 16000, 7, (c) => {
+    const r = c.createRadialGradient(256, 256, 60, 256, 256, 300); r.addColorStop(0, 'rgba(255,220,150,0.5)'); r.addColorStop(1, 'rgba(150,70,20,0.55)'); c.fillStyle = r; c.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 160; i++) { c.fillStyle = 'rgba(120,60,20,0.35)'; c.beginPath(); c.ellipse(rnd() * 512, rnd() * 512, 2 + rnd() * 6, 1 + rnd() * 4, rnd() * 3, 0, 7); c.fill(); } }), [0.26, 0.26], '#fff0c8', 4);
+  const crust = wool('crust', '#9a4e22', ['#b8642c', '#7a3a16', '#c8783c', '#5e2a10'], [2, 2], '#ffd0a0', 4);
+  s.add(mesh(g, [crumb, crust]));
+}
+function butterAt(t) { // t 0..1 = width 0..200%: a pat in the middle that gets spread wider
+  const g = new THREE.Group(); seed = 401;
+  const sx = 0.35 + t * 1.3, sz = 0.6 + t * 0.85, th = 0.11 - t * 0.05;
+  const smear = mesh(lumpy(1, 0.07, 64), butterM()); smear.scale.set(sx, th, sz); smear.position.y = TOAST_TOP; g.add(smear);
+  for (let i = 0; i < 3 + Math.round(t * 5); i++) { const r = mesh(lumpy(1, 0.1, 24), butterM()); const k = (i / 6 - 0.4);
+    r.scale.set(0.12 + t * 0.25, 0.04, 0.05); r.position.set(sx * 0.55 * Math.sign(k || 1) * Math.abs(k) * 1.6, TOAST_TOP + 0.05, (rnd() - 0.5) * sz * 1.3); g.add(r); }
+  const p = Math.max(0, 1 - t * 1.9);
+  if (p > 0) { const pat = mesh(wobble(new RoundedBoxGeometry(0.95, 0.5, 0.7, 4, 0.12), 0.05), butterM()); pat.scale.set(p * 0.8 + 0.2, p, p * 0.8 + 0.2); pat.position.y = TOAST_TOP + 0.25 * p; pat.rotation.y = 0.35; g.add(pat); }
+  return g;
+}
+// the knife: tip at the origin, blade rising up and to the right, walnut handle with brass rivets
+const KNIFE_Y = TOAST_TOP + 0.05, KW = 1000, KH = 1000;
+function knife(s) {
+  const k = new THREE.Group();
+  const blade = mesh(wobble(new RoundedBoxGeometry(0.48, 2.3, 0.07, 4, 0.2), 0.01), chrome([1, 3])); blade.position.y = 1.15; k.add(blade);
+  const smudge = mesh(lumpy(1, 0.12, 24), butterM()); smudge.scale.set(0.26, 0.42, 0.06); smudge.position.set(0, 0.42, 0.04); k.add(smudge);
+  const bolster = mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.3, 20), chrome()); bolster.position.y = 2.42; k.add(bolster);
+  const handle = mesh(wobble(new RoundedBoxGeometry(0.42, 1.8, 0.3, 4, 0.13), 0.02), walnut([1, 3])); handle.position.y = 3.45; k.add(handle);
+  [2.9, 3.9].forEach(y => { const r = mesh(new THREE.SphereGeometry(0.07, 12, 8), brassM()); r.position.set(0, y, 0.15); k.add(r); });
+  k.rotation.set(-0.55, 0, -0.75); k.position.set(0, KNIFE_Y, 0.25); s.add(k);
+}
+
+// ---------- the toaster (bass kept mono: lever down; dial: how high) ----------
+const TOASTER_CAM = [[0, 3.4, 13.5], [0, 1.9, 0], 24], XW = 460, XH = 520;
+const DIAL_POS = [-0.75, 1.15, 1.0], LEVER_X = 1.15;
+function toaster(s, on) {
+  const mint = wool('mint', '#6fd6bc', ['#8ee6d0', '#52c0a4', '#b4f4e4', '#48b096'], [3, 2], '#e8fff8', 3);
+  const body = mesh(wobble(new RoundedBoxGeometry(3.4, 2.6, 2.0, 6, 0.5), 0.015), mint); body.position.y = 1.4; s.add(body);
+  const band = mesh(new RoundedBoxGeometry(3.42, 0.22, 2.02, 3, 0.1), chrome([4, 1])); band.position.y = 0.42; s.add(band);
+  [-1.25, 1.25].forEach(x => [-0.6, 0.6].forEach(z => { const f = mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.2, 16), walnut()); f.position.set(x, 0.08, z); s.add(f); }));
+  const dark = wool('slot', '#2a1a14', ['#3a2418', '#1a0e0a'], [1, 1], '#806050', 1);
+  [-0.42, 0.42].forEach(z => {
+    const slot = mesh(new RoundedBoxGeometry(2.4, 0.1, 0.32, 3, 0.05), on ? wool('glow', '#ff7a1c', ['#ffb050', '#ff4a10', '#ffd080'], [2, 1], '#ffe0a0', 1, { emissive: new THREE.Color('#ff5a10'), emissiveIntensity: 0.9 }) : dark);
+    slot.position.set(0, 2.68, z); s.add(slot);
+    if (!on) { const sl = new THREE.Group(); toast(sl); sl.scale.setScalar(0.62); sl.rotation.x = Math.PI / 2; sl.position.set(0, 2.15 + 0.62 * 1.0, z - 0.17); s.add(sl); }
+  });
+  // the browning scale around the dial: six embroidered dots
+  for (let i = 0; i < 6; i++) { const a = (-135 + i * 54) * Math.PI / 180; const d = mesh(new THREE.SphereGeometry(0.05 + i * 0.008, 10, 8), wool('dot' + i, ['#fff0c8', '#f4d48c', '#e8aa58', '#c8782c', '#9a4e1c', '#5a2a10'][i], ['#ffffff'], [1, 1], '#ffffff', 1));
+    d.position.set(DIAL_POS[0] + Math.sin(a) * 0.5, DIAL_POS[1] + Math.cos(a) * 0.5, 1.0); s.add(d); }
+  // lever slot and the lever knob (down when bass is held mono)
+  const ls = mesh(new RoundedBoxGeometry(0.16, 1.2, 0.1, 2, 0.05), dark); ls.position.set(LEVER_X, 1.45, 0.98); s.add(ls);
+  const lever = mesh(wobble(new RoundedBoxGeometry(0.7, 0.3, 0.45, 4, 0.12), 0.03), wool('tomato', '#ee3b2e', ['#ff5a48', '#c8241c', '#ff8a70'], [1, 1], '#ffe0d8', 3));
+  lever.position.set(LEVER_X, on ? 0.95 : 1.95, 1.15); s.add(lever);
+}
+function dial(s) {
+  const d = mesh(wobble(new THREE.CylinderGeometry(0.4, 0.42, 0.22, 40), 0.02), cream([2, 1])); d.rotation.x = Math.PI / 2; s.add(d);
+  const grip = mesh(new RoundedBoxGeometry(0.14, 0.62, 0.22, 3, 0.06), walnut()); grip.position.z = 0.16; s.add(grip);
+  const tip = mesh(new THREE.SphereGeometry(0.06, 12, 8), wool('tomato', '#ee3b2e', ['#ff5a48'], [1, 1], '#ffe0d8', 2)); tip.position.set(0, 0.26, 0.28); s.add(tip);
+}
+
+// ---------- cinnamon shaker (extra spread for mono sounds) ----------
+function shaker(s) {
+  const glass = wool('glass', '#e2ecec', ['#ffffff', '#cfdcdc'], [4, 2], '#ffffff', 1.5, { transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
+  const spice = mesh(wobble(new THREE.CylinderGeometry(0.62, 0.64, 1.5, 40), 0.02), wool('cinnamon', '#a8521e', ['#c06a2a', '#8a3e14', '#d8884a'], [3, 2], '#ffd8b0', 3)); spice.position.y = 0.8; s.add(spice);
+  const body = mesh(new THREE.CylinderGeometry(0.7, 0.72, 2.3, 40, 1, true), glass, false); body.position.y = 1.2; s.add(body);
+  const cap = mesh(wobble(new THREE.CylinderGeometry(0.76, 0.76, 0.5, 40), 0.02), wool('capred', '#e8343c', ['#ff5058', '#c41c26', '#ff8890'], [4, 1], '#ffe0e0', 3)); cap.position.y = 2.55; s.add(cap);
+  const lidTop = mesh(new THREE.CylinderGeometry(0.7, 0.74, 0.12, 40), chrome()); lidTop.position.y = 2.84; s.add(lidTop);
+  for (let i = 0; i < 7; i++) { const h = mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 10), wool('slot', '#2a1a14', ['#1a0e0a'], [1, 1], '#806050', 1)); const a = i * 0.9, r = i ? 0.36 : 0; h.position.set(Math.cos(a) * r, 2.91, Math.sin(a) * r); s.add(h); }
+  const lab = mesh(new THREE.CylinderGeometry(0.73, 0.73, 0.7, 40, 1, true, -0.9, 1.8), cream([2, 1])); lab.position.y = 1.15; s.add(lab);
+}
+function dust(s) { seed = 9; const m = wool('cinnamon', '#a8521e', ['#c06a2a', '#8a3e14'], [1, 1], '#ffd8b0', 2);
+  for (let i = 0; i < 120; i++) { const r = Math.sqrt(rnd()) * 1.6, a = rnd() * 7; const d = mesh(new THREE.SphereGeometry(0.03 + rnd() * 0.04, 6, 4), m); d.scale.y = 0.4; d.position.set(Math.cos(a) * r * 1.4, 0, Math.sin(a) * r * 0.8); s.add(d); } }
+
+// ---------- teacup (output level = how full) ----------
+const CUP_CAM = [[0, 6.2, 7.4], [0, 0.7, 0], 26];
+function cup(s, level) {
+  const china = wool('china', '#fff6e8', ['#ffffff', '#f0e0c8'], [4, 2], '#ffffff', 2, { side: THREE.DoubleSide }), blue = wool('cobalt', '#2f6fe0', ['#4a88f0', '#2058c8', '#88b0ff'], [8, 1], '#e0ecff', 2);
+  const saucer = mesh(new THREE.LatheGeometry([[0, 0], [1.5, 0], [1.9, 0.14], [2.05, 0.2], [2.08, 0.16]].map(([x, y]) => new THREE.Vector2(x, y)), 64), china); s.add(saucer);
+  const sr = mesh(new THREE.TorusGeometry(1.95, 0.04, 8, 64), blue); sr.rotation.x = Math.PI / 2; sr.position.y = 0.18; s.add(sr);
+  const pts = [[0, 0.15], [0.55, 0.15], [0.7, 0.25], [1.05, 0.7], [1.25, 1.35], [1.3, 1.55], [1.22, 1.55], [1.16, 1.36], [0.98, 0.76], [0.6, 0.32], [0, 0.32]].map(([x, y]) => new THREE.Vector2(x, y));
+  s.add(mesh(new THREE.LatheGeometry(pts, 64), china));
+  const band = mesh(new THREE.TorusGeometry(1.27, 0.045, 8, 64), blue); band.rotation.x = Math.PI / 2; band.position.y = 1.48; s.add(band);
+  const handle = mesh(new THREE.TorusGeometry(0.36, 0.09, 12, 32, Math.PI * 1.4), china); handle.position.set(1.32, 0.95, 0); handle.rotation.z = -Math.PI * 0.7; s.add(handle);
+  if (level > 0) { const y = 0.36 + level / 8 * 1.08, r = 0.62 + (y - 0.32) / 1.04 * 0.56;
+    const tea = mesh(new THREE.CircleGeometry(r, 48), wool('tea', '#9a4a18', ['#b8642a', '#7a3810', '#d08848'], [2, 2], '#ffd0a0', 1)); tea.rotation.x = -Math.PI / 2; tea.position.y = y; s.add(tea);
+    const fr = mesh(new THREE.TorusGeometry(r - 0.04, 0.04, 6, 48), wool('froth', '#e8c08c', ['#fff0d0'], [4, 1], '#ffffff', 1)); fr.rotation.x = Math.PI / 2; fr.position.y = y; s.add(fr); }
+}
+
+// ---------- shortbread undo / redo, label tags, the preset menu board ----------
+function biscuit(s) {
+  const b = mesh(wobble(new THREE.CylinderGeometry(1, 1, 0.3, 48), 0.03), wool('shortbread', '#f0c46c', ['#f8d890', '#d8a048', '#fff0c0'], [1, 1], '#fff4d8', 3)); s.add(b);
+  const rim = mesh(new THREE.TorusGeometry(0.96, 0.08, 10, 48), wool('sbrim', '#d89a48', ['#c08038', '#e8b060'], [6, 1], '#ffe8c0', 3)); rim.rotation.x = Math.PI / 2; rim.position.y = 0.12; s.add(rim);
+  const choc = wool('choc', '#4a2414', ['#5a3020', '#2e140a', '#6a3c28'], [4, 1], '#d0a080', 2);
+  const arc = mesh(new THREE.TorusGeometry(0.46, 0.09, 10, 40, Math.PI * 1.35), choc); arc.rotation.x = -Math.PI / 2; arc.rotation.z = 0.3; arc.position.y = 0.17; s.add(arc);
+  const a1 = 0.3 + Math.PI * 1.35; const head = mesh(new THREE.ConeGeometry(0.2, 0.36, 16), choc);
+  head.position.set(Math.cos(a1) * 0.46, 0.18, -Math.sin(a1) * 0.46); head.rotation.set(0, a1, Math.PI / 2); head.rotation.order = 'YZX'; s.add(head);
+}
+function tag(s) { const g = new RoundedBoxGeometry(3.2, 1.0, 0.08, 3, 0.06); s.add(mesh(g, wool('tag', '#fff1d8', ['#ffffff', '#f0dcb8', '#e8cca0'], [2, 1], '#ffffff', 2)));
+  const st = mesh(new THREE.BoxGeometry(3.0, 0.04, 0.1), wool('stitch', '#e8343c', ['#ff5058'], [6, 1], '#ffffff', 1)); [-0.38, 0.38].forEach(y => { const c = st.clone(); c.position.set(0, y, 0.02); s.add(c); }); }
+function board(s) {
+  s.add(mesh(new RoundedBoxGeometry(7.2, 2.3, 0.36, 4, 0.14), walnut()));
+  const felt = mesh(new RoundedBoxGeometry(6.6, 1.75, 0.12, 4, 0.08), wool('charfelt', '#2c3430', ['#38423c', '#222a26', '#424c46'], [2, 1], '#d8e0d8', 3)); felt.position.z = 0.2; s.add(felt);
+  [[-3.3, 1], [3.3, 1], [-3.3, -1], [3.3, -1]].forEach(([x, k]) => { const n = mesh(new THREE.SphereGeometry(0.09, 12, 8), brassM()); n.position.set(x, k * 0.9, 0.2); s.add(n); });
+}
+
+// ---------- background: a felt breakfast table in a kitchen, out of focus behind ----------
+const ginghamMaps = () => woolMaps('gingham', '#fff4e4', ['#ffffff', '#f4e4d0'], 9000, 5, g => {
+  g.fillStyle = 'rgba(232,52,60,0.5)'; for (let i = 0; i < 8; i++) { g.fillRect(i * 64, 0, 32, 512); g.fillRect(0, i * 64, 512, 32); } });
+function kitchen(layer) {
+  const s = new THREE.Scene(); lights(s);
+  if (layer === 'back') {
+    const tiles = woolMaps('tiles', '#fbeed2', ['#ffffff', '#f0dcb4'], 9000, 5, (g, h) => { g.fillStyle = '#e8d2a8'; h.fillStyle = '#303030';
+      for (let i = 0; i <= 8; i++) { g.fillRect(i * 64 - 2, 0, 4, 512); g.fillRect(0, i * 64 - 2, 512, 4); h.fillRect(i * 64 - 2, 0, 4, 512); h.fillRect(0, i * 64 - 2, 512, 4); } });
+    const wall = mesh(new THREE.PlaneGeometry(80, 30), matFrom(tiles, [14, 5], '#ffffff', 3), false); wall.position.set(0, 8, -14); s.add(wall);
+    const lamp = new THREE.PointLight('#ffd8b0', 60, 40); lamp.position.set(0, 10, -6); s.add(lamp);
+    for (const y of [6.0, 10.0]) { const sh = mesh(new RoundedBoxGeometry(40, 0.4, 2, 2, 0.1), walnut([10, 1])); sh.position.set(0, y, -12.5); s.add(sh);
+      const COLS = ['#ffc23a', '#ee3b2e', '#2fa58a', '#f08a2c', '#4a7fe0', '#6fd6bc'];
+      for (let x = -19; x < 19; x += 1.5 + rnd() * 0.6) { const c = COLS[Math.floor(rnd() * COLS.length)]; const j = mesh(new RoundedBoxGeometry(0.9, 1.2 + rnd() * 0.6, 0.9, 3, 0.25), wool('jar' + c, c, [c, '#ffffff'], [1, 1], '#ffffff', 2));
+        j.position.set(x, y + 0.85, -12.4); s.add(j); } }
+  } else {
+    const cloth = mesh(new RoundedBoxGeometry(60, 1.2, 24, 4, 0.3), matFrom(ginghamMaps(), [9, 4], '#ffffff', 3)); cloth.position.set(0, -0.6, 3); s.add(cloth);
+  }
+  return s;
+}
+function background() {
+  const cam = new THREE.PerspectiveCamera(32, W / H, 0.1, 400); cam.position.set(0, 10, 19); cam.lookAt(0, 2.6, 0);
+  renderer.setSize(W, H);
+  const layer = name => { renderer.render(kitchen(name), cam); const c = document.createElement('canvas'); c.width = W; c.height = H; c.getContext('2d').drawImage(renderer.domElement, 0, 0); return c; };
+  const back = layer('back'), front = layer('front');
+  const out = document.createElement('canvas'); out.width = W; out.height = H; const o = out.getContext('2d');
+  o.fillStyle = '#f4e2c8'; o.fillRect(0, 0, W, H);
+  o.filter = 'blur(10px)'; o.drawImage(back, -24, -24, W + 48, H + 48); o.filter = 'none';
+  const haze = o.createLinearGradient(0, 0, 0, H); haze.addColorStop(0, 'rgba(255,240,215,0.15)'); haze.addColorStop(0.5, 'rgba(255,240,215,0.3)'); haze.addColorStop(1, 'rgba(255,240,215,0)'); o.fillStyle = haze; o.fillRect(0, 0, W, H);
+  o.drawImage(front, 0, 0);
+  const v = o.createRadialGradient(W / 2, H * 0.55, H * 0.35, W / 2, H * 0.55, H * 0.95); v.addColorStop(0, 'rgba(60,30,10,0)'); v.addColorStop(1, 'rgba(50,24,10,0.38)'); o.fillStyle = v; o.fillRect(0, 0, W, H);
+  return pop(out, W, H, 'image/jpeg');
+}
+
+async function titleShot() {
+  const buf = await (await fetch('fonts/georgia-bold.ttf')).arrayBuffer(); const font = new Font(new TTFLoader().parse(buf));
+  const COLS = ['#ffc23a', '#f05a3c', '#2fa58a', '#f08a2c', '#4a7fe0', '#e8445c'];
+  return shot(1100, 220, s => { const grp = new THREE.Group(); let x = 0, n = 0;
+    for (const ch of 'Butter Spread') { if (ch === ' ') { x += 0.42; continue; }
+      let g = new TextGeometry(ch, { font, size: 1.0, height: 0.3, curveSegments: 10, bevelEnabled: true, bevelThickness: 0.16, bevelSize: 0.06, bevelSegments: 6 });
+      g.deleteAttribute('normal'); g.deleteAttribute('uv'); g = mergeVertices(g, 0.001); g.computeVertexNormals(); g.computeBoundingBox();
+      const p = g.attributes.position, uv = []; for (let i = 0; i < p.count; i++) uv.push(p.getX(i) * 0.9, p.getY(i) * 0.9 + p.getZ(i) * 0.9); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      const c = COLS[n++ % COLS.length]; const m = mesh(g, wool('t' + c, c, [c, '#ffffff', '#00000022'], [0.5, 0.5], '#ffffff', 4));
+      m.position.x = x - g.boundingBox.min.x; m.rotation.z = (rnd() - 0.5) * 0.08; m.position.y = (rnd() - 0.5) * 0.08; grp.add(m); x += g.boundingBox.max.x - g.boundingBox.min.x + 0.07; }
+    grp.position.x = -x / 2; grp.position.y = -0.35; s.add(grp);
+  }, [0, 0, 10], [0, 0, 0], 15);
+}
+
+(async () => {
+  const which = P.get('only') || 'test';
+  if (which === 'test') await save('test.png', shot(TW, TH, s => { plate(s); toast(s); s.add(butterAt(0.5)); const k = new THREE.Group(); knife(k); k.position.x = 0.35 + 0.5 * 1.3; s.add(k); }, ...TOAST_CAM));
+  if (which === 'butter') {
+    await save('toast.png', shot(TW, TH, s => { plate(s); toast(s); }, ...TOAST_CAM));
+    for (let k = 0; k <= 24; k++) await save(`butter-${String(k).padStart(2, '0')}.png`, shot(TW, TH, s => s.add(butterAt(k / 24)), ...TOAST_CAM));
+    const kf = TOAST_CAM[2] * 0 + 2 * Math.atan(Math.tan(TOAST_CAM[2] * Math.PI / 360) * KH / TH) * 180 / Math.PI;
+    await save('knife.png', shot(KW, KH, knife, TOAST_CAM[0], TOAST_CAM[1], kf));
+    const at = x => project(...TOAST_CAM, TW, TH, [x, KNIFE_Y, 0.25]);
+    await saveJson('toast.json', { tipAt0: at(0), tipAt1: at(1), toastSize: [TW, TH], knifeSize: [KW, KH], spread: 'tipX = 0.35 + t*1.3 (t = width/200%)' });
+  }
+  if (which === 'props') {
+    await save('toaster-off.png', shot(XW, XH, s => toaster(s, false), ...TOASTER_CAM));
+    await save('toaster-on.png', shot(XW, XH, s => toaster(s, true), ...TOASTER_CAM));
+    await save('dial.png', shot(120, 120, dial, [0, 0, 6], [0, 0, 0], 20));
+    await saveJson('toaster.json', { dial: project(...TOASTER_CAM, XW, XH, DIAL_POS), size: [XW, XH] });
+    await save('shaker.png', shot(220, 340, shaker, [0, 5.2, 10], [0, 1.5, 0], 24));
+    await save('dust.png', shot(300, 160, dust, [0, 4, 6], [0, 0, 0], 30));
+    for (let l = 0; l <= 8; l++) await save(`cup-${l}.png`, shot(300, 260, s => cup(s, l), ...CUP_CAM));
+    await save('biscuit.png', shot(130, 120, biscuit, [0, 3.2, 2.0], [0, 0, 0], 40));
+    await save('tag.png', shot(240, 80, tag, [0, 0, 8], [0, 0, 0], 8.6));
+    await save('board.png', shot(620, 200, board, [0, 0.2, 13], [0, 0, 0], 13));
+  }
+  if (which === 'bg') await save('bg.jpg', background());
+  if (which === 'title') await save('title.png', await titleShot());
+  window.done = which; document.title = 'done ' + which;
+})().catch(e => { document.title = 'ERR ' + e.message; console.log('ERR ' + e.message + e.stack); });
+</script></body></html>

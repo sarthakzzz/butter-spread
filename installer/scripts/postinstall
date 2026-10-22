@@ -1,0 +1,4 @@
+#!/bin/sh
+# Make Logic and other hosts rescan Audio Units so Butter Spread shows up right away.
+killall -9 AudioComponentRegistrar >/dev/null 2>&1 || true
+exit 0
