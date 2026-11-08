@@ -1,0 +1,77 @@
+name: Release downloads
+
+# Builds the Windows installer and packs each download with its Read Me First,
+# then attaches them to the release (v1.0.0 by default) on GitHub.
+on:
+  push:
+    branches: [main]
+    paths: ['installer/**', '.github/workflows/release.yml']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the downloads to
+        default: v1.0.0
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || 'v1.0.0' }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build the VST3
+        run: cmake --build build --config Release --target ButterSpread_VST3 -- /m /v:minimal
+
+      - name: Make the installer and the zip
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path CMakeLists.txt -Pattern 'project\(ButterSpread VERSION ([0-9.]+)\)').Matches[0].Groups[1].Value
+          $src = "build\ButterSpread_artefacts\Release\VST3"
+          if (-not (Test-Path "$src\Butter Spread.vst3")) { Get-ChildItem -Recurse build\ButterSpread_artefacts | Select-Object -First 40; exit 1 }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          New-Item -ItemType Directory -Force dist, pack | Out-Null
+          & $iscc "/DPluginVersion=$ver" "/DSourceDir=$((Resolve-Path $src).Path)" "/DOutputDir=$((Resolve-Path pack).Path)" "/DReadme=$((Resolve-Path installer\README-Windows.txt).Path)" installer\windows\ButterSpread.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item installer\README-Windows.txt "pack\READ ME FIRST - Windows.txt"
+          Compress-Archive -Path pack\* -DestinationPath "dist\Butter-Spread-$ver-windows.zip"
+          Copy-Item installer\README-Windows.txt "dist\READ-ME-FIRST-Windows.txt"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/* --clobber
+
+  mac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack the Mac installer with its Read Me First
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver=$(sed -n 's/^project(ButterSpread VERSION \([0-9.]*\)).*/\1/p' CMakeLists.txt)
+          mkdir -p pack dist
+          gh release download "$TAG" --pattern "Butter-Spread-$ver-mac.pkg" --dir pack
+          cp installer/README-Mac.txt "pack/READ ME FIRST - Mac.txt"
+          (cd pack && zip -9 "../dist/Butter-Spread-$ver-mac.zip" *)
+          cp installer/README-Mac.txt dist/READ-ME-FIRST-Mac.txt
+          gh release upload "$TAG" dist/* --clobber
