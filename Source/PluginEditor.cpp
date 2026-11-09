@@ -25,9 +25,12 @@ constexpr float dialRadius = 30.0f;
 constexpr float tipPerUnit = 118.0f; // tip at 0: x 400 (the centre)
 float knifeTipX (float t) { return (0.35f + t * 1.3f) * tipPerUnit * 0.5f; } // offset from the toast centre, 1x px
 
+// Small text is lifted so captions, hints and tags stay readable (nothing under ~12 px at 100% size).
+static float readableHeight (float h) noexcept { return juce::jmax (h, 0.55f * h + 7.0f); }
+
 juce::Font feltFont (float height, bool bold = true)
 {
-    return juce::Font (juce::FontOptions ("Georgia", height, bold ? juce::Font::bold : juce::Font::plain));
+    return juce::Font (juce::FontOptions ("Georgia", readableHeight (height), bold ? juce::Font::bold : juce::Font::plain));
 }
 
 const juce::Colour ink (0xff4a2a18), chalk (0xfff6efe0), chalkDim (0xffc8c0b0);
@@ -91,10 +94,10 @@ static void drawTag (juce::Graphics& g, const juce::Image& tag, juce::Rectangle<
     g.drawImage (tag, r);
     g.setColour (ink.withAlpha (0.7f));
     g.setFont (feltFont (9.5f));
-    g.drawText (caption, r.withTrimmedTop (7).withHeight (12), juce::Justification::centred);
+    g.drawFittedText (caption, (r.withTrimmedTop (7).withHeight (12)).toNearestInt(), juce::Justification::centred, 1, 0.75f);
     g.setColour (ink);
     g.setFont (feltFont (14.5f));
-    g.drawText (value, r.withTrimmedTop (17).withHeight (17), juce::Justification::centred);
+    g.drawFittedText (value, (r.withTrimmedTop (17).withHeight (17)).toNearestInt(), juce::Justification::centred, 1, 0.75f);
 }
 
 void ButterSpreadEditor::paint (juce::Graphics& g)
@@ -110,15 +113,17 @@ void ButterSpreadEditor::paint (juce::Graphics& g)
         auto felt = boardArea.reduced (22, 18);
         g.setColour (hovered == Target::presetPrev ? chalk : chalkDim);
         g.setFont (feltFont (32.0f));
-        g.drawText (juce::CharPointer_UTF8 ("\xe2\x80\xb9"), felt.removeFromLeft (26), juce::Justification::centred);
+        g.drawFittedText (juce::CharPointer_UTF8 ("\xe2\x80\xb9"), (felt.removeFromLeft (26)).toNearestInt(), juce::Justification::centred, 1, 0.75f);
         g.setColour (hovered == Target::presetNext ? chalk : chalkDim);
-        g.drawText (juce::CharPointer_UTF8 ("\xe2\x80\xba"), felt.removeFromRight (26), juce::Justification::centred);
+        g.drawFittedText (juce::CharPointer_UTF8 ("\xe2\x80\xba"), (felt.removeFromRight (26)).toNearestInt(), juce::Justification::centred, 1, 0.75f);
+        // caption + name as one block, centred top-to-bottom on the felt
+        auto text = felt.withSizeKeepingCentre (felt.getWidth(), 16.0f + 26.0f);
         g.setColour (chalkDim);
         g.setFont (feltFont (9.5f, false));
-        g.drawText ("TODAY'S SPREAD", felt.removeFromTop (16), juce::Justification::centred);
+        g.drawFittedText ("TODAY'S SPREAD", (text.removeFromTop (16)).toNearestInt(), juce::Justification::centred, 1, 0.75f);
         g.setColour (chalk);
         g.setFont (feltFont (19.0f));
-        g.drawFittedText (bsProcessor.presets.getDisplayName(), felt.toNearestInt(), juce::Justification::centredTop, 1);
+        g.drawFittedText (bsProcessor.presets.getDisplayName(), text.toNearestInt(), juce::Justification::centred, 1);
     }
 
     // shortbread undo / redo (redo is the same biscuit, mirrored)
@@ -126,7 +131,7 @@ void ButterSpreadEditor::paint (juce::Graphics& g)
     {
         if (down) r = r.reduced (2);
         shadow (g, r.withTrimmedTop (r.getHeight() * 0.55f).expanded (2, 2), 0.25f);
-        g.setOpacity (enabled ? 1.0f : 0.55f);
+        g.setOpacity (enabled ? 1.0f : 0.75f);
         auto t = juce::RectanglePlacement (juce::RectanglePlacement::stretchToFit).getTransformToFit (biscuit.getBounds().toFloat(), r);
         if (mirrored)
             t = juce::AffineTransform::scale (-1.0f, 1.0f, (float) biscuit.getWidth() * 0.5f, 0.0f).followedBy (t);

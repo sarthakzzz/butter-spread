@@ -1,10 +1,10 @@
 PLUGINS FOR BREAKFAST
 We make delicious plugins
 
-BUTTER SPREAD: READ ME FIRST (WINDOWS)
-======================================
+HOW TO INSTALL ON WINDOWS
+=========================
 
-Thanks for picking up Butter Spread! This takes about two minutes.
+Thank you for your delicious purchase! Installing takes about a minute.
 
 
 A QUICK, HONEST NOTE FIRST
@@ -22,39 +22,23 @@ Please only download our plugins from our own website or store.
 If you got them anywhere else, delete them and download a fresh copy.
 
 
-STEP 1: UNBLOCK THE ZIP (before you unzip it)
----------------------------------------------
-1. Right-click the downloaded .zip file and choose "Properties".
-2. At the bottom of the General tab, tick "Unblock".
-   (If you don't see it, that's fine, skip this step.)
-3. Click OK.
-4. Now right-click the zip and choose "Extract All".
+STEP 1: UNZIP
+-------------
+Right-click the downloaded .zip and choose "Extract All".
 
 
-STEP 2: IF YOU SEE "WINDOWS PROTECTED YOUR PC"
-----------------------------------------------
-When you run Butter-Spread-1.0.0-windows-setup.exe and a blue box appears saying
+STEP 2: RUN SETUP
+-----------------
+Double-click the Setup file. If a blue box says
 "Windows protected your PC":
 1. Click "More info".
-2. Check it says "Plugins for Breakfast" or the plugin name.
-3. Click "Run anyway".
+2. Click "Run anyway".
 
 This box appears for any new, unsigned app. It is not a virus warning.
+Setup puts everything in the right place for you.
 
 
-STEP 3: PUT THE PLUGIN IN THE RIGHT FOLDER
-------------------------------------------
-If you used the installer, this is done for you. Skip to Step 4.
-
-If you're installing by hand, copy the .vst3 file (or folder) into:
-
-    C:\Program Files\Common Files\VST3
-
-Windows will ask for permission to copy there. Click "Continue".
-
-
-
-STEP 4: RESCAN IN YOUR DAW
+STEP 3: RESCAN IN YOUR DAW
 --------------------------
 Open your DAW and ask it to look for new plugins:
 
@@ -78,7 +62,6 @@ STILL STUCK?
   rather than switching your protection off. We'll help.
 
 Email: chef@pluginsforbreakfast.com
-We usually reply within a day.
+We usually reply within a day or two.
 
 Enjoy breakfast!
-The Chef, Plugins for Breakfast

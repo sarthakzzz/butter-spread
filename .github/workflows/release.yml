@@ -70,7 +70,13 @@ jobs:
         run: |
           ver=$(sed -n 's/^project(ButterSpread VERSION \([0-9.]*\)).*/\1/p' CMakeLists.txt)
           mkdir -p pack dist
-          gh release download "$TAG" --pattern "Butter-Spread-$ver-mac.pkg" --dir pack
+          # A newer Mac installer, when one is waiting on the mac-pkg branch, replaces the release's copy
+          if git fetch -q --depth 1 origin mac-pkg 2>/dev/null && git cat-file -e "FETCH_HEAD:Butter-Spread-$ver-mac.pkg" 2>/dev/null; then
+            git show "FETCH_HEAD:Butter-Spread-$ver-mac.pkg" > "pack/Butter-Spread-$ver-mac.pkg"
+            cp "pack/Butter-Spread-$ver-mac.pkg" dist/
+          else
+            gh release download "$TAG" --pattern "Butter-Spread-$ver-mac.pkg" --dir pack
+          fi
           cp installer/README-Mac.txt "pack/READ ME FIRST - Mac.txt"
           (cd pack && zip -9 "../dist/Butter-Spread-$ver-mac.zip" *)
           cp installer/README-Mac.txt dist/READ-ME-FIRST-Mac.txt

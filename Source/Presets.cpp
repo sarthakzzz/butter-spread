@@ -31,6 +31,10 @@ PresetManager::PresetManager (juce::AudioProcessorValueTreeState& s) : state (s)
 {
     for (auto* id : paramIds)
         state.addParameterListener (id, this);
+
+    // JUCE always passes on each parameter's first change notification, even for an unchanged value.
+    // Use it up here, so a host re-sending unchanged values when it opens the plug-in doesn't mark the preset edited.
+    apply ([this] { for (auto* p : state.processor.getParameters()) p->sendValueChangedMessageToListeners (p->getValue()); });
 }
 
 PresetManager::~PresetManager()
