@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "FullScreen.h"
 
 /** A felt breakfast table. The knife spreads the butter (width), the cinnamon shaker is the
     doubler, the toaster keeps the bass mono (lever) below its dial, and the teacup is the output. */
@@ -45,6 +46,10 @@ private:
     juce::Point<float> dragStart;
     juce::String lastSnapshot;
     std::unique_ptr<juce::AlertWindow> saveWindow;
+
+    /** Full screen button: fills the screen, press again to go back. */
+    sk::FullScreen fullScreen;
+    sk::FullScreenButton fullScreenButton;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ButterSpreadEditor)
 };

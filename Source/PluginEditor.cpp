@@ -48,17 +48,19 @@ ButterSpreadEditor::ButterSpreadEditor (ButterSpreadProcessor& p)
         cup[i] = art (juce::String::formatted ("cup%d_png", i).toRawUTF8());
 
     setWantsKeyboardFocus (true);
-    setResizable (true, true);
-    setResizeLimits (baseWidth * 3 / 4, baseHeight * 3 / 4, baseWidth * 2, baseHeight * 2);
-    if (auto* c = getConstrainer())
-        c->setFixedAspectRatio ((double) baseWidth / baseHeight);
+    sk::FullScreen::allowSizes (*this, baseWidth, baseHeight, 0.75);
+    fullScreenButton.onClick = [this] { fullScreen.toggle (*this, baseWidth, baseHeight); };
+    addAndMakeVisible (fullScreenButton);
     setSize (baseWidth, baseHeight);
     startTimerHz (30);
 }
 
 ButterSpreadEditor::~ButterSpreadEditor() = default;
 
-void ButterSpreadEditor::resized() { scale = (float) getWidth() / (float) baseWidth; }
+void ButterSpreadEditor::resized() { scale = (float) getWidth() / (float) baseWidth;
+    fullScreenButton.setBounds (sk::FullScreen::place ({ 840.0f, 16.0f }, scale));
+    fullScreenButton.setFull (fullScreen.isFull (*this));
+}
 
 float ButterSpreadEditor::value (const char* id) const
 {
